@@ -195,6 +195,7 @@ defmodule Commanded.ProcessManagers.ProcessManager do
 
   @type domain_event :: struct
   @type command :: struct
+  @type metadata :: struct
   @type process_manager :: struct
   @type process_uuid :: String.t() | [String.t()]
   @type consistency :: :eventual | :strong
@@ -254,7 +255,7 @@ defmodule Commanded.ProcessManagers.ProcessManager do
   The `c:handle/2` function can be omitted if you do not need to dispatch a
   command and are only mutating the process manager's state.
   """
-  @callback handle(process_manager, domain_event) :: command | list(command) | {:error, term}
+  @callback handle(process_manager, domain_event, metadata) :: command | list(command) | {:error, term}
 
   @doc """
   Mutate the process manager's state by applying the domain event.
@@ -266,7 +267,7 @@ defmodule Commanded.ProcessManagers.ProcessManager do
   This callback function is optional, the default behaviour is to retain the
   process manager's current state.
   """
-  @callback apply(process_manager, domain_event) :: process_manager
+  @callback apply(process_manager, domain_event, metadata) :: process_manager
 
   @doc """
   Called when a command dispatch or event handling returns an error.
