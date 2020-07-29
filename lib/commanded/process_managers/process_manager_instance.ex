@@ -239,7 +239,7 @@ defmodule Commanded.ProcessManagers.ProcessManagerInstance do
     } = state
 
     try do
-      process_manager_module.handle(process_state, data)
+      process_manager_module.handle(process_state, data, event)
     rescue
       error ->
         stacktrace = __STACKTRACE__
@@ -327,7 +327,7 @@ defmodule Commanded.ProcessManagers.ProcessManagerInstance do
     } = state
 
     try do
-      process_manager_module.apply(process_state, data)
+      process_manager_module.apply(process_state, data, event)
     rescue
       error ->
         stacktrace = __STACKTRACE__

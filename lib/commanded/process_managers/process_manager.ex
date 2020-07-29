@@ -388,10 +388,10 @@ defmodule Commanded.ProcessManagers.ProcessManager do
       def interested?(_event), do: false
 
       @doc false
-      def handle(_process_manager, _event), do: []
+      def handle(_process_manager, _event, _metadata), do: []
 
       @doc false
-      def apply(process_manager, _event), do: process_manager
+      def apply(process_manager, _event, _metadata), do: process_manager
 
       @doc false
       def error({:error, reason}, _command, _failure_context), do: {:stop, reason}
