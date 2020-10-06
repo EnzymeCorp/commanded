@@ -69,28 +69,31 @@ defmodule Commanded.Aggregates.Aggregate do
     lifespan_timeout: :infinity
   ]
 
-  def start_link(config, args) do
-    aggregate_module = Keyword.fetch!(args, :aggregate_module)
-    aggregate_uuid = Keyword.fetch!(args, :aggregate_uuid)
+  def start_link(config, opts) do
+    {start_opts, aggregate_opts} =
+      Keyword.split(opts, [:debug, :name, :timeout, :spawn_opt, :hibernate_after])
 
-    unless is_atom(aggregate_module) and is_binary(aggregate_uuid) do
-      raise "aggregate_module must be an atom and aggregate_uuid must be a string"
-    end
+    aggregate_module = Keyword.fetch!(aggregate_opts, :aggregate_module)
+    aggregate_uuid = Keyword.fetch!(aggregate_opts, :aggregate_uuid)
+
+    unless is_atom(aggregate_module),
+      do: raise(ArgumentError, message: "aggregate module must be an atom")
+
+    unless is_binary(aggregate_uuid),
+      do: raise(ArgumentError, message: "aggregate identity must be a string")
 
     application = Keyword.fetch!(config, :application)
     snapshotting = Keyword.get(config, :snapshotting, %{})
     snapshot_options = Map.get(snapshotting, aggregate_module, [])
 
-    aggregate = %Aggregate{
+    state = %Aggregate{
       application: application,
       aggregate_module: aggregate_module,
       aggregate_uuid: aggregate_uuid,
       snapshotting: Snapshotting.new(application, aggregate_uuid, snapshot_options)
     }
 
-    opts = [name: args[:name]]
-
-    GenServer.start_link(__MODULE__, aggregate, opts)
+    GenServer.start_link(__MODULE__, state, start_opts)
   end
 
   @doc false
@@ -276,14 +279,14 @@ defmodule Commanded.Aggregates.Aggregate do
   @doc false
   @impl GenServer
   def handle_info({:events, events}, %Aggregate{} = state) do
-    %Aggregate{lifespan_timeout: lifespan_timeout} = state
+    %Aggregate{application: application, lifespan_timeout: lifespan_timeout} = state
 
     Logger.debug(fn -> describe(state) <> " received events: #{inspect(events)}" end)
 
     try do
       state =
         events
-        |> Upcast.upcast_event_stream()
+        |> Upcast.upcast_event_stream(additional_metadata: %{application: application})
         |> Enum.reduce(state, &handle_event/2)
 
       state = Enum.reduce(events, state, &handle_event/2)
@@ -434,33 +437,45 @@ defmodule Commanded.Aggregates.Aggregate do
     end
   end
 
+  defp before_execute_command(_aggregate_state, %ExecutionContext{before_execute: nil}), do: :ok
+
+  defp before_execute_command(aggregate_state, %ExecutionContext{} = context) do
+    %ExecutionContext{handler: handler, before_execute: before_execute} = context
+    Kernel.apply(handler, before_execute, [aggregate_state, context])
+  end
+
   defp execute_command(%ExecutionContext{} = context, %Aggregate{} = state) do
     %ExecutionContext{command: command, handler: handler, function: function} = context
     %Aggregate{aggregate_state: aggregate_state} = state
 
     Logger.debug(fn -> describe(state) <> " executing command: " <> inspect(command) end)
 
-    case Kernel.apply(handler, function, [aggregate_state, command]) do
+    with :ok <- before_execute_command(aggregate_state, context) do
+      case Kernel.apply(handler, function, [aggregate_state, command]) do
+        {:error, _error} = reply ->
+          {reply, state}
+
+        none when none in [:ok, nil, []] ->
+          {{:ok, []}, state}
+
+        %Commanded.Aggregate.Multi{} = multi ->
+          case Commanded.Aggregate.Multi.run(multi) do
+            {:error, _error} = reply ->
+              {reply, state}
+
+            {aggregate_state, pending_events} ->
+              persist_events(pending_events, aggregate_state, context, state)
+          end
+
+        {:ok, pending_events} ->
+          apply_and_persist_events(pending_events, context, state)
+
+        pending_events ->
+          apply_and_persist_events(pending_events, context, state)
+      end
+    else
       {:error, _error} = reply ->
         {reply, state}
-
-      none when none in [:ok, nil, []] ->
-        {{:ok, []}, state}
-
-      %Commanded.Aggregate.Multi{} = multi ->
-        case Commanded.Aggregate.Multi.run(multi) do
-          {:error, _error} = reply ->
-            {reply, state}
-
-          {aggregate_state, pending_events} ->
-            persist_events(pending_events, aggregate_state, context, state)
-        end
-
-      {:ok, pending_events} ->
-        apply_and_persist_events(pending_events, context, state)
-
-      pending_events ->
-        apply_and_persist_events(pending_events, context, state)
     end
   rescue
     error ->

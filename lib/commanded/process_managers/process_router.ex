@@ -11,7 +11,6 @@ defmodule Commanded.ProcessManagers.ProcessRouter do
   alias Commanded.EventStore.Subscription
   alias Commanded.ProcessManagers.FailureContext
   alias Commanded.ProcessManagers.ProcessManagerInstance
-  alias Commanded.ProcessManagers.ProcessRouter
   alias Commanded.ProcessManagers.Supervisor
   alias Commanded.Subscriptions
 
@@ -37,15 +36,19 @@ defmodule Commanded.ProcessManagers.ProcessRouter do
   end
 
   def start_link(application, process_name, process_module, opts \\ []) do
-    name = {application, ProcessRouter, process_name}
-    consistency = Keyword.get(opts, :consistency, :eventual)
+    {start_opts, router_opts} =
+      Keyword.split(opts, [:debug, :name, :timeout, :spawn_opt, :hibernate_after])
+
+    name = name(application, process_name)
+    consistency = Keyword.get(router_opts, :consistency, :eventual)
 
     subscription =
       Subscription.new(
         application: application,
         subscription_name: process_name,
-        subscribe_from: Keyword.get(opts, :start_from, :origin),
-        subscribe_to: Keyword.get(opts, :subscribe_to, :all)
+        subscribe_from: Keyword.get(router_opts, :start_from, :origin),
+        subscribe_to: Keyword.get(router_opts, :subscribe_to, :all),
+        subscription_opts: Keyword.get(router_opts, :subscription_opts, [])
       )
 
     state = %State{
@@ -54,17 +57,20 @@ defmodule Commanded.ProcessManagers.ProcessRouter do
       process_manager_module: process_module,
       consistency: consistency,
       subscription: subscription,
-      event_timeout: Keyword.get(opts, :event_timeout),
-      idle_timeout: Keyword.get(opts, :idle_timeout, :infinity)
+      event_timeout: Keyword.get(router_opts, :event_timeout),
+      idle_timeout: Keyword.get(router_opts, :idle_timeout, :infinity)
     }
 
-    with {:ok, pid} <- Registration.start_link(application, name, __MODULE__, state) do
+    with {:ok, pid} <- Registration.start_link(application, name, __MODULE__, state, start_opts) do
       # Register the process manager as a subscription with the given consistency.
-      :ok = Subscriptions.register(application, process_name, pid, consistency)
+      :ok = Subscriptions.register(application, process_name, process_module, pid, consistency)
 
       {:ok, pid}
     end
   end
+
+  @doc false
+  def name(application, process_name), do: {application, __MODULE__, process_name}
 
   # Acknowledge successful handling of the given event by a process manager instance.
   def ack_event(process_router, %RecordedEvent{} = event, instance) do
@@ -176,7 +182,7 @@ defmodule Commanded.ProcessManagers.ProcessRouter do
 
   @impl GenServer
   def handle_info({:events, events}, %State{} = state) do
-    %State{pending_events: pending_events} = state
+    %State{application: application, pending_events: pending_events} = state
 
     Logger.debug(fn -> describe(state) <> " received #{length(events)} event(s)" end)
 
@@ -184,7 +190,7 @@ defmodule Commanded.ProcessManagers.ProcessRouter do
     unseen_events =
       events
       |> Enum.reject(&event_already_seen?(&1, state))
-      |> Upcast.upcast_event_stream()
+      |> Upcast.upcast_event_stream(additional_metadata: %{application: application})
 
     state =
       case {pending_events, unseen_events} do

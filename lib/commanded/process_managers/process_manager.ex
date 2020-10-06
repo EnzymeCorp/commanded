@@ -50,6 +50,36 @@ defmodule Commanded.ProcessManagers.ProcessManager do
 
       {:ok, process_manager} = ExampleProcessManager.start_link()
 
+  ## `c:init/1` callback
+
+  An `c:init/1` function can be defined in your process manager which is used to
+  provide runtime configuration. This callback function must return
+  `{:ok, config}` with the updated config.
+
+  ### Example
+
+  The `c:init/1` function is used to define the process manager's application
+  and name based upon a value provided at runtime:
+
+      defmodule ExampleProcessManager do
+        use Commanded.ProcessManagers.ProcessManager
+
+        def init(config) do
+          {tenant, config} = Keyword.pop!(config, :tenant)
+
+          config =
+            config
+            |> Keyword.put(:application, Module.concat([ExampleApp, tenant]))
+            |> Keyword.put(:name, Module.concat([__MODULE__, tenant]))
+
+          {:ok, config}
+        end
+      end
+
+  Usage:
+
+      {:ok, _pid} = ExampleProcessManager.start_link(tenant: :tenant1)
+
   ## Error handling
 
   You can define an `c:error/3` callback function to handle any errors or
@@ -201,6 +231,15 @@ defmodule Commanded.ProcessManagers.ProcessManager do
   @type consistency :: :eventual | :strong
 
   @doc """
+  Optional callback function called to configure the process manager before it
+  starts.
+
+  It is passed the merged compile-time and runtime config, and must return the
+  updated config.
+  """
+  @callback init(config :: Keyword.t()) :: {:ok, Keyword.t()}
+
+  @doc """
   Is the process manager interested in the given command?
 
   The `c:interested?/1` function is used to indicate which events the process
@@ -285,11 +324,13 @@ defmodule Commanded.ProcessManagers.ProcessManager do
   error severity:
 
   - `{:retry, context}` - retry the failed command, provide a context
-    map containing any state passed to subsequent failures. This could be used
-    to count the number of retries, failing after too many attempts.
+    map or `Commanded.ProcessManagers.FailureContext` struct, containing any
+    state passed to subsequent failures. This could be used to count the number
+    of retries, failing after too many attempts.
 
   - `{:retry, delay, context}` - retry the failed command, after sleeping for
-    the requested delay (in milliseconds). Context is a map as described in
+    the requested delay (in milliseconds). Context is a map or
+    `Commanded.ProcessManagers.FailureContext` as described in
     `{:retry, context}` above.
 
   - `{:stop, reason}` - stop the process manager with the given reason.
@@ -302,11 +343,14 @@ defmodule Commanded.ProcessManagers.ProcessManager do
   For command dispatch failures, when failure source is a command, you can also
   return:
 
-  - `{:skip, :discard_pending}` - discard the failed command and any pending
+  - `:skip` - skip the failed command and continue dispatching any pending
     commands.
 
   - `{:skip, :continue_pending}` - skip the failed command, but continue
     dispatching any pending commands.
+
+  - `{:skip, :discard_pending}` - discard the failed command and any pending
+    commands.
 
   - `{:continue, commands, context}` - continue dispatching the given commands.
     This allows you to retry the failed command, modify it and retry, drop it
@@ -320,14 +364,13 @@ defmodule Commanded.ProcessManagers.ProcessManager do
               failure_context :: FailureContext.t()
             ) ::
               {:continue, commands :: list(command), context :: map()}
-              | {:retry, context :: map()}
-              | {:retry, delay :: non_neg_integer(), context :: map()}
+              | {:retry, context :: map() | FailureContext.t()}
+              | {:retry, delay :: non_neg_integer(), context :: map() | FailureContext.t()}
               | :skip
               | {:skip, :discard_pending}
               | {:skip, :continue_pending}
               | {:stop, reason :: term()}
 
-  alias Commanded.Event.Handler
   alias Commanded.ProcessManagers.ProcessManager
   alias Commanded.ProcessManagers.ProcessRouter
 
@@ -335,21 +378,15 @@ defmodule Commanded.ProcessManagers.ProcessManager do
   defmacro __using__(opts) do
     quote location: :keep do
       @before_compile unquote(__MODULE__)
-
       @behaviour ProcessManager
-
-      {application, name} = ProcessManager.compile_config(__MODULE__, unquote(opts))
-
       @opts unquote(opts)
-      @application application
-      @name name
 
       def start_link(opts \\ []) do
-        application = Keyword.get(opts, :application, @application)
-        module_opts = Keyword.drop(@opts, [:application, :name])
-        opts = Handler.start_opts(__MODULE__, module_opts, opts, [:event_timeout, :idle_timeout])
+        opts = Keyword.merge(@opts, opts)
 
-        ProcessRouter.start_link(application, @name, __MODULE__, opts)
+        {application, name, config} = ProcessManager.parse_config!(__MODULE__, opts)
+
+        ProcessRouter.start_link(application, name, __MODULE__, config)
       end
 
       @doc """
@@ -364,11 +401,13 @@ defmodule Commanded.ProcessManagers.ProcessManager do
 
       """
       def child_spec(opts) do
-        application = Keyword.get(opts, :application, @application)
+        opts = Keyword.merge(@opts, opts)
+
+        {application, name, config} = ProcessManager.parse_config!(__MODULE__, opts)
 
         default = %{
-          id: {__MODULE__, application, @name},
-          start: {__MODULE__, :start_link, [opts]},
+          id: {__MODULE__, application, name},
+          start: {ProcessRouter, :start_link, [application, name, __MODULE__, config]},
           restart: :permanent,
           type: :worker
         }
@@ -377,13 +416,15 @@ defmodule Commanded.ProcessManagers.ProcessManager do
       end
 
       @doc false
-      def __name__, do: @name
+      def init(config), do: {:ok, config}
+
+      defoverridable init: 1
     end
   end
 
   @doc false
   defmacro __before_compile__(_env) do
-    # include default fallback functions at end, with lowest precedence
+    # Include default fallback functions at end, with lowest precedence
     quote generated: true do
       @doc false
       def interested?(_event), do: false
@@ -424,17 +465,51 @@ defmodule Commanded.ProcessManagers.ProcessManager do
       end
 
   """
-  defdelegate identity, to: Commanded.ProcessManagers.ProcessManagerInstance
+  defdelegate identity(), to: Commanded.ProcessManagers.ProcessManagerInstance
 
-  def compile_config(module, opts) do
-    application = Keyword.get(opts, :application)
+  # GenServer start options
+  @start_opts [:debug, :name, :timeout, :spawn_opt, :hibernate_after]
+
+  # Process manager configuration options
+  @handler_opts [
+    :application,
+    :name,
+    :consistency,
+    :start_from,
+    :subscribe_to,
+    :subscription_opts,
+    :event_timeout,
+    :idle_timeout
+  ]
+
+  def parse_config!(module, config) do
+    {:ok, config} = module.init(config)
+
+    {_valid, invalid} = Keyword.split(config, @start_opts ++ @handler_opts)
+
+    if Enum.any?(invalid) do
+      raise ArgumentError,
+            inspect(module) <> " specifies invalid options: " <> inspect(Keyword.keys(invalid))
+    end
+
+    {application, config} = Keyword.pop(config, :application)
 
     unless application do
       raise ArgumentError, inspect(module) <> " expects :application option"
     end
 
-    name = Handler.parse_name(module, Keyword.get(opts, :name))
+    {name, config} = Keyword.pop(config, :name)
+    name = parse_name(name)
 
-    {application, name}
+    unless name do
+      raise ArgumentError, inspect(module) <> " expects :name option"
+    end
+
+    {application, name, config}
   end
+
+  @doc false
+  def parse_name(name) when name in [nil, ""], do: nil
+  def parse_name(name) when is_binary(name), do: name
+  def parse_name(name), do: inspect(name)
 end

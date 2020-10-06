@@ -16,10 +16,14 @@ defmodule Commanded.Registration do
   end
 
   @doc false
-  def start_link(application, name, module, args) do
+  def start_link(application, name, module, args, start_opts) do
     {adapter, adapter_meta} = Application.registry_adapter(application)
 
-    adapter.start_link(adapter_meta, name, module, args)
+    if function_exported?(adapter, :start_link, 5) do
+      adapter.start_link(adapter_meta, name, module, args, start_opts)
+    else
+      adapter.start_link(adapter_meta, name, module, args)
+    end
   end
 
   @doc false

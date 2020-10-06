@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.2.0
+
+### Enhancements
+
+- Add `init/1` callback function to event handlers and process managers ([#393](https://github.com/commanded/commanded/pull/393)).
+- Include `application` and `handler_name` as additional event handler metadata ([#396](https://github.com/commanded/commanded/pull/396)).
+- Allow `GenServer` start options to be provided when starting event handlers and process managers ([#398](https://github.com/commanded/commanded/pull/398)).
+- Add `hibernate_after` option to application config ([#399](https://github.com/commanded/commanded/pull/399)).
+- Add support for providing adapter-specific event store subscription options ([#391](https://github.com/commanded/commanded/pull/391)).
+- Support custom state for event handlers ([#400](https://github.com/commanded/commanded/pull/400)).
+- Allow event handlers and process manager `error` callback to return failure context struct ([#397](https://github.com/commanded/commanded/issues/397)).
+- Allow a before execute function to be defined which is called with the command dispatch execution context and aggregate state before ([#402](https://github.com/commanded/commanded/pull/402)).
+
+### Bug fixes
+
+- Allow process manager `error/3` callback to return `:skip` for failed commands, not just failed events ([#362](https://github.com/commanded/commanded/issues/362)).
+
+---
+
 ## v1.1.1
 
 ### Enhancements
@@ -36,6 +55,8 @@
 
 - Fixes the typespec for command dispatch ([#325](https://github.com/commanded/commanded/pull/325)).
 - Process manager stops if `interested?/1` returns an empty list ([#335](https://github.com/commanded/commanded/pull/335)).
+
+---
 
 ## v1.0.1
 
@@ -148,7 +169,7 @@
 
   ```elixir
   defp deps do
-    [{:jason, "~> 1.1"}]
+    [{:jason, "~> 1.2"}]
   end
   ```
 
