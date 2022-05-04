@@ -2,6 +2,18 @@
 
 ## Next release
 
+- Allow a process manager to stop after dispatching a command ([#460](https://github.com/commanded/commanded/pull/460)).
+- Replace `use Mix.Config` with `import Config` in config files ([#467](https://github.com/commanded/commanded/pull/467)).
+
+## v1.3.1
+
+### Bug fixes
+
+- Event Handler not calling `init/1` callback function on restart ([#463](https://github.com/commanded/commanded/pull/463)).
+- Call process manager `init/1` function on process restart ([#464](https://github.com/commanded/commanded/pull/464)).
+
+## v1.3.0
+
 ### Enhancements
 
 - Allow command identity to be provided during dispatch ([#406](https://github.com/commanded/commanded/pull/406)).
@@ -14,6 +26,8 @@
 - Ensure command dispatch metadata is a map ([#432](https://github.com/commanded/commanded/pull/432)).
 - Retry command execution on node down ([#429](https://github.com/commanded/commanded/pull/429)).
 - Dispatch returning resultant events ([#444](https://github.com/commanded/commanded/pull/444)).
+- Get aggregate state ([#448](https://github.com/commanded/commanded/pull/448)).
+- Support telemetry v1.0 ([#456](https://github.com/commanded/commanded/pull/456)).
 
 ## v1.2.0
 
@@ -61,7 +75,7 @@
 - Remove router module compile-time checking ([#363](https://github.com/commanded/commanded/pull/363)).
 - Reduce memory consumption during aggregate state rebuild ([#368](https://github.com/commanded/commanded/pull/368)).
 - Upgrade to `phoenix_pubsub` to 2.0 ([#365](https://github.com/commanded/commanded/pull/365)).
-- Ignore `:not_found` error when reseting InMemory event store ([#354](https://github.com/commanded/commanded/pull/354)).
+- Ignore `:not_found` error when resetting InMemory event store ([#354](https://github.com/commanded/commanded/pull/354)).
 - Add `router/1` to `locals_without_parens` in Mix format config ([#351](https://github.com/commanded/commanded/pull/351)).
 - Include stacktrace in event handler and process manager `error` callback functions ([#342](https://github.com/commanded/commanded/pull/342)).
 - Call event handler's `error/3` callback function when `handle/2` function returns an invalid value ([#372](https://github.com/commanded/commanded/pull/372)).

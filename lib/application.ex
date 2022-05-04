@@ -1,6 +1,9 @@
 defmodule Commanded.Application do
   use TelemetryRegistry
 
+  alias Commanded.Aggregates.Aggregate
+  alias Commanded.Application.Config
+
   telemetry_event(%{
     event: [:commanded, :application, :dispatch, :start],
     description: "Emitted when an application starts dispatching a command",
@@ -111,8 +114,8 @@ defmodule Commanded.Application do
   own separately configured and isolated event store. Each application must be
   started with a unique name.
 
-  Multipe instances of the same event handler or process manager can be
-  started by refering to a started application by its name. The event store
+  Multiple instances of the same event handler or process manager can be
+  started by referring to a started application by its name. The event store
   operations can also be scoped to an application by referring to its name.
 
   ### Example
@@ -202,6 +205,15 @@ defmodule Commanded.Application do
         Supervisor.stop(pid, :normal, timeout)
       end
 
+      def aggregate_state(aggregate_module, aggregate_uuid, timeout \\ 5000) do
+        Aggregate.aggregate_state(
+          __MODULE__,
+          aggregate_module,
+          aggregate_uuid,
+          timeout
+        )
+      end
+
       defp name(opts) do
         case Keyword.get(opts, :name) do
           nil ->
@@ -239,7 +251,7 @@ defmodule Commanded.Application do
   @doc """
   Starts the application supervisor.
 
-  Returns `{:ok, pid}` on sucess, `{:error, {:already_started, pid}}` if the
+  Returns `{:ok, pid}` on success, `{:error, {:already_started, pid}}` if the
   application is already started, or `{:error, term}` in case anything else goes
   wrong.
   """
@@ -258,7 +270,7 @@ defmodule Commanded.Application do
 
     - `command` is a command struct which must be registered with a
       `Commanded.Commands.Router` and included in the application.
-      
+
   """
   @callback dispatch(command :: struct()) ::
               :ok
@@ -346,8 +358,6 @@ defmodule Commanded.Application do
               | {:error, :unregistered_command}
               | {:error, :consistency_timeout}
               | {:error, reason :: term()}
-
-  alias Commanded.Application.Config
 
   @doc false
   def dispatch(application, command, opts \\ [])

@@ -157,6 +157,7 @@ Commanded exists thanks to the following people who have contributed.
 - [Luís Ferreira](https://github.com/zamith)
 - [Marcelo Dominguez](https://github.com/marpo60)
 - [Matt Doughty](https://github.com/m-doughty)
+- [Michael Herold](https://github.com/michaelherold)
 - [Miguel Palhas](https://github.com/naps62)
 - [Nigel Thorne](https://github.com/nigelthorne)
 - [Olafur Arason](https://github.com/olafura)
@@ -166,6 +167,7 @@ Commanded exists thanks to the following people who have contributed.
 - [Raphaël Lustin](https://github.com/rlustin)
 - [Štefan Ľupták](https://github.com/EskiMag)
 - [Tobiasz Małecki](https://github.com/amatalai)
+- [Willy Wombat](https://github.com/octowombat)
 - [Yuri de Figueiredo](https://github.com/y86)
 - [Zven](https://github.com/zven21)
 

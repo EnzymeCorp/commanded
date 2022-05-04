@@ -1,13 +1,13 @@
 defmodule Commanded.Mixfile do
   use Mix.Project
 
-  @version "1.2.0"
+  @version "1.3.1"
 
   def project do
     [
       app: :commanded,
       version: @version,
-      elixir: "~> 1.6",
+      elixir: "~> 1.9",
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       description: description(),
@@ -59,7 +59,7 @@ defmodule Commanded.Mixfile do
       {:elixir_uuid, "~> 1.2"},
 
       # Telemetry
-      {:telemetry, "~> 0.4"},
+      {:telemetry, "~> 0.4 or ~> 1.0"},
       {:telemetry_registry, "~> 0.2"},
 
       # Optional dependencies
@@ -68,6 +68,7 @@ defmodule Commanded.Mixfile do
 
       # Build and test tools
       {:benchfella, "~> 0.3", only: :bench},
+      {:credo, "~> 1.6", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.1", only: :dev, runtime: false},
       {:ex_doc, ">= 0.0.0", only: :dev},
       {:local_cluster, "~> 1.2", only: :test, runtime: false},
@@ -136,6 +137,7 @@ defmodule Commanded.Mixfile do
         Aggregates: [
           Commanded.Aggregate.Multi,
           Commanded.Aggregates.Aggregate,
+          Commanded.Aggregates.AggregateStateBuilder,
           Commanded.Aggregates.AggregateLifespan,
           Commanded.Aggregates.DefaultLifespan,
           Commanded.Aggregates.ExecutionContext,
@@ -232,7 +234,8 @@ defmodule Commanded.Mixfile do
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/commanded/commanded",
-        "Docs" => "https://hexdocs.pm/commanded/"
+        "Docs" => "https://hexdocs.pm/commanded/",
+        "Sponsor" => "https://opencollective.com/commanded"
       }
     ]
   end
