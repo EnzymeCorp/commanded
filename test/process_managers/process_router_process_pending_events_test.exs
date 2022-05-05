@@ -6,16 +6,23 @@ defmodule Commanded.ProcessManagers.ProcessRouterProcessPendingEventsTest do
 
   alias Commanded.EventStore
   alias Commanded.Helpers.Wait
-  alias Commanded.ProcessManagers.ExampleApp
-  alias Commanded.ProcessManagers.ExampleRouter
-  alias Commanded.ProcessManagers.ExampleProcessManager
-  alias Commanded.ProcessManagers.ProcessRouter
-  alias Commanded.ProcessManagers.ProcessManagerInstance
+
+  alias Commanded.ProcessManagers.{
+    ExampleApp,
+    ExampleProcessManager,
+    ExampleRouter,
+    ProcessManagerInstance,
+    ProcessRouter
+  }
+
   alias Commanded.ProcessManagers.ExampleAggregate.Commands.{Publish, Start}
-  alias Commanded.ProcessManagers.ExampleAggregate.Events.Interested
-  alias Commanded.ProcessManagers.ExampleAggregate.Events.Started
-  alias Commanded.ProcessManagers.ExampleAggregate.Events.Stopped
-  alias Commanded.ProcessManagers.ExampleAggregate.Events.Uninterested
+
+  alias Commanded.ProcessManagers.ExampleAggregate.Events.{
+    Interested,
+    Started,
+    Stopped,
+    Uninterested
+  }
 
   setup do
     start_supervised!(ExampleApp)
@@ -69,7 +76,10 @@ defmodule Commanded.ProcessManagers.ProcessRouterProcessPendingEventsTest do
                {:error, :process_manager_not_found}
 
       # Process state snapshot should be deleted
-      assert EventStore.read_snapshot(ExampleApp, "example_process_manager-#{aggregate_uuid}") ==
+      assert EventStore.read_snapshot(
+               ExampleApp,
+               "\"ExampleProcessManager\"-\"#{aggregate_uuid}\""
+             ) ==
                {:error, :snapshot_not_found}
     end)
   end

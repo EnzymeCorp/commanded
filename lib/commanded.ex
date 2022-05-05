@@ -20,13 +20,32 @@ defmodule Commanded do
 
   use Application
 
+  alias Commanded.Aggregates.Aggregate
+  alias Commanded.Application.Config
+
   @doc false
   def start(_type, _args) do
     children = [
-      Commanded.Application.Config
+      Config
     ]
 
     opts = [strategy: :one_for_one, name: Commanded.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  @doc """
+  Retrieve aggregate state of an aggregate.
+
+  Retrieving aggregate state is done by calling to the opened aggregate,
+  or querying the event store for an optional state snapshot
+  and then replaying the aggregate's event stream.
+  """
+  def aggregate_state(application, aggregate_module, aggregate_uuid, timeout \\ 5_000) do
+    Aggregate.aggregate_state(
+      application,
+      aggregate_module,
+      aggregate_uuid,
+      timeout
+    )
   end
 end

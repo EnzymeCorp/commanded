@@ -145,6 +145,9 @@ defmodule Commanded.Commands.Router do
 
     - `:aggregate_version` - to return only the aggregate version.
 
+    - `:events` - to return the resultant domain events. An empty list will be
+      returned if no events were produced.
+
     - `:execution_result` - to return a `Commanded.Commands.ExecutionResult`
       struct containing the aggregate's identity, state, version, and any events
       produced from the command along with their associated metadata.
@@ -298,9 +301,7 @@ defmodule Commanded.Commands.Router do
                 by
 
               invalid ->
-                raise "#{inspect(aggregate_module)} aggregate identity has an invalid `by` option: #{
-                        inspect(invalid)
-                      }"
+                raise "#{inspect(aggregate_module)} aggregate identity has an invalid `by` option: #{inspect(invalid)}"
             end
 
           prefix =
@@ -315,9 +316,7 @@ defmodule Commanded.Commands.Router do
                 prefix
 
               invalid ->
-                raise "#{inspect(aggregate_module)} aggregate has an invalid identity prefix: #{
-                        inspect(invalid)
-                      }"
+                raise "#{inspect(aggregate_module)} aggregate has an invalid identity prefix: #{inspect(invalid)}"
             end
 
           @registered_identities Map.put(@registered_identities, aggregate_module,
@@ -326,9 +325,7 @@ defmodule Commanded.Commands.Router do
                                  )
 
         config ->
-          raise "#{inspect(aggregate_module)} aggregate has already been identified by: `#{
-                  inspect(Keyword.get(config, :by))
-                }`"
+          raise "#{inspect(aggregate_module)} aggregate has already been identified by: `#{inspect(Keyword.get(config, :by))}`"
       end
     end
   end
@@ -356,9 +353,7 @@ defmodule Commanded.Commands.Router do
            end) do
           raise ArgumentError,
             message:
-              "Command `#{inspect(unquote(command_module))}` has already been registered in router `#{
-                inspect(__MODULE__)
-              }`"
+              "Command `#{inspect(unquote(command_module))}` has already been registered in router `#{inspect(__MODULE__)}`"
         end
 
         @registered_commands {
@@ -410,6 +405,9 @@ defmodule Commanded.Commands.Router do
         - `causation_id` - an optional UUID used to identify the cause of the
           command being dispatched.
 
+        - `command_uuid` - an optional UUID used to identify the command being
+          dispatched.
+
         - `correlation_id` - an optional UUID used to correlate related
           commands/events together.
 
@@ -432,6 +430,9 @@ defmodule Commanded.Commands.Router do
 
             - `:aggregate_version` - to include the aggregate stream version
               in the successful response: `{:ok, aggregate_version}`.
+
+            - `:events` - to return the resultant domain events. An empty list
+              will be returned if no events were produced.
 
             - `:execution_result` - to return a `Commanded.Commands.ExecutionResult`
               struct containing the aggregate's identity, version, and any
@@ -513,9 +514,11 @@ defmodule Commanded.Commands.Router do
 
           application = Keyword.fetch!(opts, :application)
           causation_id = Keyword.get(opts, :causation_id)
-          correlation_id = Keyword.get(opts, :correlation_id, UUID.uuid4())
+          command_uuid = Keyword.get(opts, :command_uuid, UUID.uuid4())
           consistency = Keyword.fetch!(opts, :consistency)
-          metadata = Keyword.fetch!(opts, :metadata)
+          correlation_id = Keyword.get(opts, :correlation_id, UUID.uuid4())
+          metadata = opts |> Keyword.fetch!(:metadata) |> validate_metadata()
+
           retry_attempts = Keyword.get(opts, :retry_attempts)
           timeout = Keyword.fetch!(opts, :timeout)
 
@@ -530,6 +533,7 @@ defmodule Commanded.Commands.Router do
               (returning = Keyword.get(opts, :returning)) in [
                 :aggregate_state,
                 :aggregate_version,
+                :events,
                 :execution_result,
                 false
               ] ->
@@ -554,7 +558,7 @@ defmodule Commanded.Commands.Router do
           payload = %Payload{
             application: application,
             command: command,
-            command_uuid: UUID.uuid4(),
+            command_uuid: command_uuid,
             causation_id: causation_id,
             correlation_id: correlation_id,
             consistency: consistency,
@@ -584,6 +588,10 @@ defmodule Commanded.Commands.Router do
 
         {:error, :unregistered_command}
       end
+
+      # Make sure the metadata must be Map.t()
+      defp validate_metadata(value) when is_map(value), do: value
+      defp validate_metadata(_), do: raise(ArgumentError, message: "metadata must be an map")
     end
   end
 
@@ -598,6 +606,7 @@ defmodule Commanded.Commands.Router do
       (default_dispatch_return = get_opt(opts, :default_dispatch_return)) in [
         :aggregate_state,
         :aggregate_version,
+        :events,
         :execution_result,
         false
       ] ->
@@ -645,7 +654,7 @@ defmodule Commanded.Commands.Router do
   defp parse_opts([{param, _value} | _opts], _result) do
     raise """
     unexpected dispatch parameter "#{param}"
-    available params are: #{@register_params |> Enum.map(&to_string/1) |> Enum.join(", ")}
+    available params are: #{Enum.map_join(@register_params, ", ", &to_string/1)}
     """
   end
 

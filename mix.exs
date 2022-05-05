@@ -1,13 +1,13 @@
 defmodule Commanded.Mixfile do
   use Mix.Project
 
-  @version "1.2.0"
+  @version "1.3.1"
 
   def project do
     [
       app: :commanded,
       version: @version,
-      elixir: "~> 1.6",
+      elixir: "~> 1.9",
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       description: description(),
@@ -30,8 +30,8 @@ defmodule Commanded.Mixfile do
     ]
   end
 
-  defp extra_applications(:test), do: [:logger, :phoenix_pubsub]
-  defp extra_applications(_env), do: [:logger]
+  defp extra_applications(:test), do: [:crypto, :logger, :phoenix_pubsub]
+  defp extra_applications(_env), do: [:crypto, :logger]
 
   defp elixirc_paths(env) when env in [:bench, :test],
     do: [
@@ -58,17 +58,22 @@ defmodule Commanded.Mixfile do
       {:backoff, "~> 1.1"},
       {:elixir_uuid, "~> 1.2"},
 
+      # Telemetry
+      {:telemetry, "~> 0.4 or ~> 1.0"},
+      {:telemetry_registry, "~> 0.2"},
+
       # Optional dependencies
       {:jason, "~> 1.2", optional: true},
       {:phoenix_pubsub, "~> 2.0", optional: true},
 
       # Build and test tools
       {:benchfella, "~> 0.3", only: :bench},
-      {:dialyxir, "~> 1.0", only: :dev, runtime: false},
+      {:credo, "~> 1.6", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.1", only: :dev, runtime: false},
       {:ex_doc, ">= 0.0.0", only: :dev},
-      {:local_cluster, "~> 1.1", only: :test, runtime: false},
+      {:local_cluster, "~> 1.2", only: :test, runtime: false},
       {:mix_test_watch, "~> 1.0", only: :dev},
-      {:mox, "~> 0.5", only: [:bench, :test]}
+      {:mox, "~> 1.0", only: [:bench, :test]}
     ]
   end
 
@@ -132,6 +137,7 @@ defmodule Commanded.Mixfile do
         Aggregates: [
           Commanded.Aggregate.Multi,
           Commanded.Aggregates.Aggregate,
+          Commanded.Aggregates.AggregateStateBuilder,
           Commanded.Aggregates.AggregateLifespan,
           Commanded.Aggregates.DefaultLifespan,
           Commanded.Aggregates.ExecutionContext,
@@ -155,6 +161,7 @@ defmodule Commanded.Mixfile do
         ],
         "Event Store": [
           Commanded.EventStore,
+          Commanded.EventStore.Adapter,
           Commanded.EventStore.Adapters.InMemory,
           Commanded.EventStore.EventData,
           Commanded.EventStore.RecordedEvent,
@@ -163,12 +170,15 @@ defmodule Commanded.Mixfile do
         ],
         "Pub Sub": [
           Commanded.PubSub,
+          Commanded.PubSub.Adapter,
           Commanded.PubSub.LocalPubSub,
           Commanded.PubSub.PhoenixPubSub
         ],
         Registry: [
           Commanded.Registration,
-          Commanded.Registration.LocalRegistry
+          Commanded.Registration.Adapter,
+          Commanded.Registration.LocalRegistry,
+          Commanded.Registration.GlobalRegistry
         ],
         Serialization: [
           Commanded.Serialization.JsonDecoder,
@@ -189,6 +199,18 @@ defmodule Commanded.Mixfile do
           Commanded.AggregateCase,
           Commanded.Assertions.EventAssertions
         ]
+      ],
+      nest_modules_by_prefix: [
+        Commanded.Aggregate,
+        Commanded.Aggregates,
+        Commanded.Commands,
+        Commanded.Event,
+        Commanded.ProcessManagers,
+        Commanded.EventStore,
+        Commanded.PubSub,
+        Commanded.Registration,
+        Commanded.Serialization,
+        Commanded.Middleware
       ]
     ]
   end
@@ -212,7 +234,8 @@ defmodule Commanded.Mixfile do
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/commanded/commanded",
-        "Docs" => "https://hexdocs.pm/commanded/"
+        "Docs" => "https://hexdocs.pm/commanded/",
+        "Sponsor" => "https://opencollective.com/commanded"
       }
     ]
   end

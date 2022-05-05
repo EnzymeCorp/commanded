@@ -1,4 +1,54 @@
 defmodule Commanded.Event.Handler do
+  use GenServer
+  use Commanded.Registration
+  use TelemetryRegistry
+
+  telemetry_event(%{
+    event: [:commanded, :event, :handle, :start],
+    description: "Emitted when an event handler starts handling an event",
+    measurements: "%{system_time: integer()}",
+    metadata: """
+    %{application: Commanded.Application.t(),
+      context: map(),
+      handler_name: String.t(),
+      handler_module: atom(),
+      handler_state: map(),
+      recorded_event: RecordedEvent.t()}
+    """
+  })
+
+  telemetry_event(%{
+    event: [:commanded, :event, :handle, :stop],
+    description: "Emitted when an event handler stops handling an event",
+    measurements: "%{duration: non_neg_integer()}",
+    metadata: """
+    %{:application => Commanded.Application.t(),
+      :context => map(),
+      :handler_name => String.t(),
+      :handler_module => atom(),
+      :handler_state => map(),
+      :recorded_event => RecordedEvent.t(),
+      optional(:error) => any()}
+    """
+  })
+
+  telemetry_event(%{
+    event: [:commanded, :event, :handle, :exception],
+    description: "Emitted when an event handler raises an exception",
+    measurements: "%{duration: non_neg_integer()}",
+    metadata: """
+    %{application: Commanded.Application.t(),
+      context: map(),
+      handler_name: String.t(),
+      handler_module: atom(),
+      handler_state: map(),
+      recorded_event: RecordedEvent.t(),
+      kind: :throw | :error | :exit,
+      reason: any(),
+      stacktrace: list()}
+    """
+  })
+
   @moduledoc """
   Defines the behaviour an event handler must implement and
   provides a convenience macro that implements the behaviour, allowing you to
@@ -224,10 +274,12 @@ defmodule Commanded.Event.Handler do
 
   The above example requires three named Commanded applications to have already
   been started.
-  """
 
-  use GenServer
-  use Commanded.Registration
+  ## Telemetry
+
+  #{telemetry_docs()}
+
+  """
 
   require Logger
 
@@ -237,6 +289,7 @@ defmodule Commanded.Event.Handler do
   alias Commanded.EventStore.RecordedEvent
   alias Commanded.EventStore.Subscription
   alias Commanded.Subscriptions
+  alias Commanded.Telemetry
 
   @type domain_event :: struct()
   @type metadata :: map()
@@ -406,6 +459,8 @@ defmodule Commanded.Event.Handler do
               | :skip
               | {:stop, reason :: term()}
 
+  @optional_callbacks init: 0, init: 1, error: 3
+
   defmacro __using__(opts) do
     quote location: :keep do
       @before_compile unquote(__MODULE__)
@@ -460,13 +515,9 @@ defmodule Commanded.Event.Handler do
 
       """
       def child_spec(opts) do
-        opts = Keyword.merge(@opts, opts)
-
-        {application, name, config} = Handler.parse_config!(__MODULE__, opts)
-
         default = %{
-          id: {__MODULE__, application, name},
-          start: {Handler, :start_link, [application, name, __MODULE__, config]},
+          id: {__MODULE__, opts},
+          start: {__MODULE__, :start_link, [opts]},
           restart: :permanent,
           type: :worker
         }
@@ -596,7 +647,14 @@ defmodule Commanded.Event.Handler do
   @doc false
   @impl GenServer
   def init(%Handler{} = state) do
+    Process.flag(:trap_exit, true)
+
     {:ok, state, {:continue, :subscribe_to_events}}
+  end
+
+  @impl GenServer
+  def terminate(reason, state) do
+    Logger.debug(fn -> describe(state) <> " is shutting down due to #{inspect(reason)}" end)
   end
 
   @doc false
@@ -732,13 +790,13 @@ defmodule Commanded.Event.Handler do
     end
   end
 
-  defp handle_event(event, handler, context \\ %{})
+  defp handle_event(event, context \\ %{}, handler)
 
   # Ignore already seen event.
   defp handle_event(
          %RecordedEvent{event_number: event_number} = event,
-         %Handler{last_seen_event: last_seen_event} = state,
-         _context
+         _context,
+         %Handler{last_seen_event: last_seen_event} = state
        )
        when not is_nil(last_seen_event) and event_number <= last_seen_event do
     Logger.debug(fn -> describe(state) <> " has already seen event ##{inspect(event_number)}" end)
@@ -747,19 +805,29 @@ defmodule Commanded.Event.Handler do
   end
 
   # Delegate event to handler module.
-  defp handle_event(%RecordedEvent{} = event, %Handler{} = state, context) do
+  defp handle_event(%RecordedEvent{} = event, context, %Handler{} = state) do
+    telemetry_metadata = telemetry_metadata(event, context, state)
+    start_time = telemetry_start(telemetry_metadata)
+
     case delegate_event_to_handler(event, state) do
       :ok ->
+        telemetry_stop(start_time, telemetry_metadata)
+
         confirm_receipt(event, state)
 
       {:ok, handler_state} ->
+        telemetry_stop(start_time, Map.put(telemetry_metadata, :handler_state, handler_state))
+
         confirm_receipt(event, %Handler{state | handler_state: handler_state})
 
       {:error, :already_seen_event} ->
+        telemetry_stop(start_time, Map.put(telemetry_metadata, :error, :already_seen_event))
+
         confirm_receipt(event, state)
 
-      {:error, _reason} = error ->
+      {:error, reason} = error ->
         log_event_error(error, event, state)
+        telemetry_stop(start_time, Map.put(telemetry_metadata, :error, reason))
 
         failure_context = build_failure_context(event, context, state)
 
@@ -767,6 +835,7 @@ defmodule Commanded.Event.Handler do
 
       {:error, reason, stacktrace} ->
         log_event_error({:error, reason}, event, state)
+        telemetry_exception(start_time, :error, reason, stacktrace, telemetry_metadata)
 
         failure_context = build_failure_context(event, context, stacktrace, state)
 
@@ -782,14 +851,12 @@ defmodule Commanded.Event.Handler do
             ", expected `:ok` or `{:error, term}`"
         end)
 
+        telemetry_stop(start_time, Map.put(telemetry_metadata, :error, :invalid_return_value))
+
+        error = {:error, :invalid_return_value}
         failure_context = build_failure_context(event, context, state)
 
-        handle_event_error(
-          {:error, :invalid_return_value},
-          event,
-          failure_context,
-          state
-        )
+        handle_event_error(error, event, failure_context, state)
     end
   end
 
@@ -860,13 +927,13 @@ defmodule Commanded.Event.Handler do
         # Retry the failed event
         Logger.info(fn -> describe(state) <> " is retrying failed event" end)
 
-        handle_event(failed_event, state, context)
+        handle_event(failed_event, context, state)
 
       {:retry, context} when is_map(context) ->
         # Retry the failed event
         Logger.info(fn -> describe(state) <> " is retrying failed event" end)
 
-        handle_event(failed_event, state, context)
+        handle_event(failed_event, context, state)
 
       {:retry, delay, %FailureContext{context: context}}
       when is_map(context) and is_integer(delay) and delay >= 0 ->
@@ -877,7 +944,7 @@ defmodule Commanded.Event.Handler do
 
         :timer.sleep(delay)
 
-        handle_event(failed_event, state, context)
+        handle_event(failed_event, context, state)
 
       {:retry, delay, context} when is_map(context) and is_integer(delay) and delay >= 0 ->
         # Retry the failed event after waiting for the given delay, in milliseconds
@@ -887,7 +954,7 @@ defmodule Commanded.Event.Handler do
 
         :timer.sleep(delay)
 
-        handle_event(failed_event, state, context)
+        handle_event(failed_event, context, state)
 
       :skip ->
         # Skip the failed event by confirming receipt
@@ -940,6 +1007,43 @@ defmodule Commanded.Event.Handler do
     :ok = Subscriptions.ack_event(application, handler_name, consistency, event)
 
     %Handler{state | last_seen_event: event_number}
+  end
+
+  defp telemetry_start(telemetry_metadata) do
+    Telemetry.start([:commanded, :event, :handle], telemetry_metadata)
+  end
+
+  defp telemetry_stop(start_time, telemetry_metadata) do
+    Telemetry.stop([:commanded, :event, :handle], start_time, telemetry_metadata)
+  end
+
+  defp telemetry_exception(start_time, kind, reason, stacktrace, telemetry_metadata) do
+    Telemetry.exception(
+      [:commanded, :event, :handle],
+      start_time,
+      kind,
+      reason,
+      stacktrace,
+      telemetry_metadata
+    )
+  end
+
+  defp telemetry_metadata(recorded_event, context, %Handler{} = state) do
+    %Handler{
+      application: application,
+      handler_name: handler_name,
+      handler_module: handler_module,
+      handler_state: handler_state
+    } = state
+
+    %{
+      application: application,
+      handler_name: handler_name,
+      handler_module: handler_module,
+      handler_state: handler_state,
+      context: context,
+      recorded_event: recorded_event
+    }
   end
 
   defp consistency(opts) do

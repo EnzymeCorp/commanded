@@ -1,4 +1,50 @@
 defmodule Commanded.ProcessManagers.ProcessManager do
+  use TelemetryRegistry
+
+  telemetry_event(%{
+    event: [:commanded, :process_manager, :handle, :start],
+    description: "Emitted when a process manager starts handling an event",
+    measurements: "%{system_time: integer()}",
+    metadata: """
+    %{application: Commanded.Application.t(),
+      process_manager_name: String.t() | Inspect.t(),
+      process_manager_module: module(),
+      process_state: term(),
+      process_uuid: String.t()}
+    """
+  })
+
+  telemetry_event(%{
+    event: [:commanded, :process_manager, :handle, :stop],
+    description: "Emitted when a process manager stops handling an event",
+    measurements: "%{system_time: integer()}",
+    metadata: """
+    %{application: Commanded.Application.t(),
+      commands: [struct()],
+      error: nil | any(),
+      process_manager_name: String.t() | Inspect.t(),
+      process_manager_module: module(),
+      process_state: term(),
+      process_uuid: String.t()}
+    """
+  })
+
+  telemetry_event(%{
+    event: [:commanded, :process_manager, :handle, :exception],
+    description: "Emitted when a process manager raises an exception",
+    measurements: "%{system_time: integer()}",
+    metadata: """
+    %{application: Commanded.Application.t(),
+      process_manager_name: String.t() | Inspect.t(),
+      process_manager_module: module(),
+      process_state: term(),
+      process_uuid: String.t(),
+      kind: :throw | :error | :exit,
+      reason: any(),
+      stacktrace: list()}
+    """
+  })
+
   @moduledoc """
   Macro used to define a process manager.
 
@@ -16,6 +62,7 @@ defmodule Commanded.ProcessManagers.ProcessManager do
   - `c:interested?/1`
   - `c:handle/2`
   - `c:apply/2`
+  - `c:after_command/2
   - `c:error/3`
 
   Please read the [Process managers](process-managers.html) guide for more
@@ -28,12 +75,18 @@ defmodule Commanded.ProcessManagers.ProcessManager do
           application: ExampleApp,
           name: "ExampleProcessManager"
 
+        defstruct []
+
         def interested?(%AnEvent{uuid: uuid}), do: {:start, uuid}
 
         def handle(%ExampleProcessManager{}, %ExampleEvent{}) do
           [
             %ExampleCommand{}
           ]
+        end
+
+        def after_command(%ExampleProcessManager{}, %ExampleCommand{}) do
+          :stop
         end
 
         def error({:error, failure}, %ExampleEvent{}, _failure_context) do
@@ -219,6 +272,11 @@ defmodule Commanded.ProcessManagers.ProcessManager do
 
   The above example requires three named Commanded applications to have already
   been started.
+
+  ## Telemetry
+
+  #{telemetry_docs()}
+
   """
 
   alias Commanded.ProcessManagers.FailureContext
@@ -280,6 +338,16 @@ defmodule Commanded.ProcessManagers.ProcessManager do
               | {:continue!, process_uuid}
               | {:stop, process_uuid}
               | false
+
+  @doc """
+  Stop the process manager instance after a command is successfully
+  dispatched.
+
+  The `c:after_command/2` function can be omitted if you do not need to stop
+  after a specific command or if you would instead use the `c:interested?/1`
+  stop mechanism.
+  """
+  @callback after_command(process_manager, domain_event) :: :continue | :stop
 
   @doc """
   Process manager instance handles a domain event, returning any commands to
@@ -370,6 +438,8 @@ defmodule Commanded.ProcessManagers.ProcessManager do
               | {:skip, :continue_pending}
               | {:stop, reason :: term()}
 
+  @optional_callbacks init: 1, handle: 2, apply: 2, error: 3, interested?: 1, after_command: 2
+
   alias Commanded.ProcessManagers.ProcessManager
   alias Commanded.ProcessManagers.ProcessRouter
 
@@ -400,13 +470,9 @@ defmodule Commanded.ProcessManagers.ProcessManager do
 
       """
       def child_spec(opts) do
-        opts = Keyword.merge(@opts, opts)
-
-        {application, name, config} = ProcessManager.parse_config!(__MODULE__, opts)
-
         default = %{
-          id: {__MODULE__, application, name},
-          start: {ProcessRouter, :start_link, [application, name, __MODULE__, config]},
+          id: {__MODULE__, opts},
+          start: {__MODULE__, :start_link, [opts]},
           restart: :permanent,
           type: :worker
         }
@@ -425,6 +491,9 @@ defmodule Commanded.ProcessManagers.ProcessManager do
   defmacro __before_compile__(_env) do
     # Include default fallback functions at end, with lowest precedence
     quote generated: true do
+      @doc false
+      def after_command(_process_manager, _event), do: :continue
+
       @doc false
       def interested?(_event), do: false
 
