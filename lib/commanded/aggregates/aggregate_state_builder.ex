@@ -5,6 +5,8 @@ defmodule Commanded.Aggregates.AggregateStateBuilder do
   alias Commanded.EventStore.SnapshotData
   alias Commanded.Snapshotting
 
+  require Logger
+
   @read_event_batch_size 100
 
   @doc """
@@ -82,7 +84,7 @@ defmodule Commanded.Aggregates.AggregateStateBuilder do
 
             {:error, error} ->
               Logger.warn(fn ->
-                describe(state) <> " snapshot failed due to: " <> inspect(error)
+                "snapshot failed due to: " <> inspect(error)
               end)
 
               state
