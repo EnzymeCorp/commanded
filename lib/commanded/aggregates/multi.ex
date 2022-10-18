@@ -78,7 +78,7 @@ defmodule Commanded.Aggregate.Multi do
       |> Multi.execute(:interesting_event, fn aggregate ->
         %Event{data: 1}
       end)
-      |> Multi.execute(fn aggregate, %{interesting_events: _aggregate_after_interesting_event} ->
+      |> Multi.execute(fn aggregate, %{interesting_event: _aggregate_after_interesting_event} ->
         %Event{data: 2}
       end)
   """
