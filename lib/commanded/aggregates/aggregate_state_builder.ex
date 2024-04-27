@@ -1,4 +1,6 @@
 defmodule Commanded.Aggregates.AggregateStateBuilder do
+  require Logger
+
   alias Commanded.Aggregates.Aggregate
   alias Commanded.EventStore
   alias Commanded.EventStore.RecordedEvent
@@ -64,13 +66,48 @@ defmodule Commanded.Aggregates.AggregateStateBuilder do
   defp rebuild_from_event_stream(event_stream, %Aggregate{} = state) do
     Enum.reduce(event_stream, state, fn event, state ->
       %RecordedEvent{data: data, stream_version: stream_version} = event
-      %Aggregate{aggregate_module: aggregate_module, aggregate_state: aggregate_state} = state
 
       %Aggregate{
-        state
+        aggregate_module: aggregate_module,
+        aggregate_state: aggregate_state,
+        aggregate_version: aggregate_version,
+        snapshotting: snapshotting
+      } = state
+
+      state_with_snapshot =
+        if snapshotting && Snapshotting.snapshot_required?(snapshotting, stream_version) do
+          case Snapshotting.take_snapshot(snapshotting, aggregate_version, aggregate_state) do
+            {:ok, snapshotting} ->
+              # nocommit
+              IO.puts("Stream version: #{stream_version}")
+              %Aggregate{state | snapshotting: snapshotting}
+
+            {:error, error} ->
+              Logger.warning(fn ->
+                describe(state) <> " snapshot failed due to: " <> inspect(error)
+              end)
+
+              state
+          end
+        else
+          state
+        end
+
+      %Aggregate{
+        state_with_snapshot
         | aggregate_version: stream_version,
           aggregate_state: aggregate_module.apply(aggregate_state, data)
       }
     end)
+  end
+
+  defp describe(%Aggregate{} = aggregate) do
+    %Aggregate{
+      aggregate_module: aggregate_module,
+      aggregate_uuid: aggregate_uuid,
+      aggregate_version: aggregate_version
+    } = aggregate
+
+    "#{inspect(aggregate_module)}<#{aggregate_uuid}@#{aggregate_version}>"
   end
 end
