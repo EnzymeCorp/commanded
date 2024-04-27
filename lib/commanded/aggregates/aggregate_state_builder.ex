@@ -67,31 +67,9 @@ defmodule Commanded.Aggregates.AggregateStateBuilder do
     Enum.reduce(event_stream, state, fn event, state ->
       %RecordedEvent{data: data, stream_version: stream_version} = event
 
-      %Aggregate{
-        aggregate_module: aggregate_module,
-        aggregate_state: aggregate_state,
-        aggregate_version: aggregate_version,
-        snapshotting: snapshotting
-      } = state
+      %Aggregate{aggregate_module: aggregate_module, aggregate_state: aggregate_state} = state
 
-      state_with_snapshot =
-        if snapshotting && Snapshotting.snapshot_required?(snapshotting, stream_version) do
-          case Snapshotting.take_snapshot(snapshotting, aggregate_version, aggregate_state) do
-            {:ok, snapshotting} ->
-              # nocommit
-              IO.puts("Stream version: #{stream_version}")
-              %Aggregate{state | snapshotting: snapshotting}
-
-            {:error, error} ->
-              Logger.warning(fn ->
-                describe(state) <> " snapshot failed due to: " <> inspect(error)
-              end)
-
-              state
-          end
-        else
-          state
-        end
+      state_with_snapshot = state_with_snapshot(stream_version, state)
 
       %Aggregate{
         state_with_snapshot
@@ -99,6 +77,33 @@ defmodule Commanded.Aggregates.AggregateStateBuilder do
           aggregate_state: aggregate_module.apply(aggregate_state, data)
       }
     end)
+  end
+
+  defp state_with_snapshot(
+         stream_version,
+         %Aggregate{
+           aggregate_state: aggregate_state,
+           aggregate_version: aggregate_version,
+           snapshotting: snapshotting
+         } = state
+       ) do
+    if snapshotting && Snapshotting.snapshot_required?(snapshotting, stream_version) do
+      case Snapshotting.take_snapshot(snapshotting, aggregate_version, aggregate_state) do
+        {:ok, snapshotting} ->
+          # nocommit
+          IO.puts("Stream version: #{stream_version}")
+          %Aggregate{state | snapshotting: snapshotting}
+
+        {:error, error} ->
+          Logger.warning(fn ->
+            describe(state) <> " snapshot failed due to: " <> inspect(error)
+          end)
+
+          state
+      end
+    else
+      state
+    end
   end
 
   defp describe(%Aggregate{} = aggregate) do
