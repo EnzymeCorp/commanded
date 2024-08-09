@@ -371,6 +371,7 @@ defmodule Commanded.Commands.Router do
           | {:ok, aggregate_state :: struct()}
           | {:ok, aggregate_version :: non_neg_integer()}
           | {:ok, execution_result :: ExecutionResult.t()}
+          | {:ok, events :: list()}
           | {:error, :unregistered_command}
           | {:error, :consistency_timeout}
           | {:error, reason :: term()}
